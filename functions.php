@@ -6,13 +6,12 @@ add_filter( 'wp_theme_project_mode', 'wpbb_restaurant_project_mode' );
 
 function wpbb_restaurant_assets() {
     $theme = wp_get_theme();
-    wp_enqueue_style( 'wpbb-restaurant-meta', get_stylesheet_uri(), array( 'wp-theme-style' ), $theme->get( 'Version' ) );
     $manifest = get_stylesheet_directory() . '/dist/.vite/manifest.json';
     if ( ! is_readable( $manifest ) ) return;
     $data = json_decode( (string) file_get_contents( $manifest ), true );
     if ( ! is_array( $data ) ) return;
     if ( ! empty( $data['src/scss/public.scss']['file'] ) ) {
-        wp_enqueue_style( 'wpbb-restaurant-app', get_stylesheet_directory_uri() . '/dist/' . ltrim( $data['src/scss/public.scss']['file'], '/' ), array( 'wpbb-restaurant-meta' ), $theme->get( 'Version' ) );
+        wp_enqueue_style( 'wpbb-restaurant-app', get_stylesheet_directory_uri() . '/dist/' . ltrim( $data['src/scss/public.scss']['file'], '/' ), array(), $theme->get( 'Version' ) );
         if ( function_exists( 'wp_theme_sector_customizer_css' ) ) wp_add_inline_style( 'wpbb-restaurant-app', wp_theme_sector_customizer_css( '#6D2E2E', '18px', '--sector-primary', '--sector-radius' ) );
     }
     if ( ! empty( $data['src/js/main.js']['file'] ) ) wp_enqueue_script( 'wpbb-restaurant-app', get_stylesheet_directory_uri() . '/dist/' . ltrim( $data['src/js/main.js']['file'], '/' ), array(), $theme->get( 'Version' ), true );
@@ -181,3 +180,177 @@ function wpbb_restaurant_register_reservations(){register_post_type('table_reser
 function wpbb_restaurant_reservation_form(){$success=isset($_GET['reservation'])&&'received'===sanitize_key(wp_unslash($_GET['reservation']));ob_start();?><section class="wpbb-sector-request" id="reservation"><p class="wp-theme-sector-eyebrow"><?php echo esc_html(__( 'Reservations', 'wp-bbtheme-child-restaurant' ));?></p><h2><?php echo esc_html(__( 'Request a table.', 'wp-bbtheme-child-restaurant' ));?></h2><?php if($success):?><div class="alert alert-success"><?php echo esc_html(__( 'Thanks. Your table request has been received.', 'wp-bbtheme-child-restaurant' ));?></div><?php endif;?><form method="post" action="<?php echo esc_url(admin_url('admin-post.php'));?>"><input type="hidden" name="action" value="wpbb_restaurant_reserve"><?php wp_nonce_field('wpbb_restaurant_reserve','wpbb_restaurant_nonce');?><label><span><?php echo esc_html(__( 'Name', 'wp-bbtheme-child-restaurant' ));?></span><input name="name" required></label><label><span><?php echo esc_html(__( 'Email', 'wp-bbtheme-child-restaurant' ));?></span><input type="email" name="email" required></label><label><span><?php echo esc_html(__( 'Date', 'wp-bbtheme-child-restaurant' ));?></span><input type="date" name="date" required></label><label><span><?php echo esc_html(__( 'Time', 'wp-bbtheme-child-restaurant' ));?></span><input type="time" name="time" required></label><label><span><?php echo esc_html(__( 'Party size', 'wp-bbtheme-child-restaurant' ));?></span><input type="number" min="1" name="party" required></label><label><span><?php echo esc_html(__( 'Phone', 'wp-bbtheme-child-restaurant' ));?></span><input type="tel" name="phone"></label><label class="is-wide"><span><?php echo esc_html(__( 'Dietary or accessibility notes', 'wp-bbtheme-child-restaurant' ));?></span><textarea name="notes"></textarea></label><button class="btn btn-primary" type="submit"><?php echo esc_html(__( 'Request table', 'wp-bbtheme-child-restaurant' ));?></button></form></section><?php return ob_get_clean();}
 function wpbb_restaurant_append_reservation($content){if(!is_page('contact')||!in_the_loop()||!is_main_query())return$content;return$content.wpbb_restaurant_reservation_form();}add_filter('the_content','wpbb_restaurant_append_reservation',30);
 function wpbb_restaurant_reserve_submit(){if(empty($_POST['wpbb_restaurant_nonce'])||!wp_verify_nonce(sanitize_text_field(wp_unslash($_POST['wpbb_restaurant_nonce'])),'wpbb_restaurant_reserve'))wp_die('Expired form.');$name=sanitize_text_field(wp_unslash($_POST['name']??''));$email=sanitize_email(wp_unslash($_POST['email']??''));$date=sanitize_text_field(wp_unslash($_POST['date']??''));$time=sanitize_text_field(wp_unslash($_POST['time']??''));$party=absint($_POST['party']??0);if(!$name||!is_email($email)||!$date||!$time||!$party)wp_die('Required fields missing.');$id=wp_insert_post(array('post_type'=>'table_reservation','post_status'=>'publish','post_title'=>sprintf('%s — %s %s',$name,$date,$time)));if($id&&!is_wp_error($id))foreach(array('name'=>$name,'email'=>$email,'date'=>$date,'time'=>$time,'party'=>$party,'phone'=>sanitize_text_field(wp_unslash($_POST['phone']??'')),'notes'=>sanitize_textarea_field(wp_unslash($_POST['notes']??'')))as$key=>$value)update_post_meta($id,'_restaurant_reservation_'.$key,$value);wp_safe_redirect(add_query_arg('reservation','received',wp_theme_demo_page_url('contact')).'#reservation');exit;}add_action('admin_post_wpbb_restaurant_reserve','wpbb_restaurant_reserve_submit');add_action('admin_post_nopriv_wpbb_restaurant_reserve','wpbb_restaurant_reserve_submit');
+
+/**
+ * v3.8.10.20: keep editable Mega Menu content out of public discovery / SEO.
+ * The parent already registers these objects as private; child filters make the
+ * intent explicit for Core XML sitemaps and common SEO plugins too.
+ */
+function wpbb_child_private_megamenu_post_type_args( $args, $post_type ) {
+    if ( 'megamenu' !== $post_type ) return $args;
+    $args['public'] = false;
+    $args['publicly_queryable'] = false;
+    $args['exclude_from_search'] = true;
+    $args['has_archive'] = false;
+    $args['rewrite'] = false;
+    $args['query_var'] = false;
+    return $args;
+}
+add_filter( 'register_post_type_args', 'wpbb_child_private_megamenu_post_type_args', 20, 2 );
+
+function wpbb_child_private_megamenu_taxonomy_args( $args, $taxonomy ) {
+    if ( 'megamenu-cat' !== $taxonomy ) return $args;
+    $args['public'] = false;
+    $args['publicly_queryable'] = false;
+    $args['rewrite'] = false;
+    $args['query_var'] = false;
+    return $args;
+}
+add_filter( 'register_taxonomy_args', 'wpbb_child_private_megamenu_taxonomy_args', 20, 2 );
+
+function wpbb_child_core_sitemap_post_types( $post_types ) {
+    unset( $post_types['megamenu'] );
+    return $post_types;
+}
+add_filter( 'wp_sitemaps_post_types', 'wpbb_child_core_sitemap_post_types', 20 );
+
+function wpbb_child_core_sitemap_taxonomies( $taxonomies ) {
+    unset( $taxonomies['megamenu-cat'] );
+    return $taxonomies;
+}
+add_filter( 'wp_sitemaps_taxonomies', 'wpbb_child_core_sitemap_taxonomies', 20 );
+
+function wpbb_child_mega_robots( $robots ) {
+    if ( is_singular( 'megamenu' ) || is_tax( 'megamenu-cat' ) ) {
+        $robots['noindex'] = true;
+        $robots['nofollow'] = true;
+    }
+    return $robots;
+}
+add_filter( 'wp_robots', 'wpbb_child_mega_robots', 20 );
+
+function wpbb_child_yoast_exclude_megamenu_post_type( $excluded, $post_type ) {
+    return 'megamenu' === $post_type ? true : $excluded;
+}
+add_filter( 'wpseo_sitemap_exclude_post_type', 'wpbb_child_yoast_exclude_megamenu_post_type', 20, 2 );
+
+function wpbb_child_yoast_exclude_megamenu_taxonomy( $excluded, $taxonomy ) {
+    return 'megamenu-cat' === $taxonomy ? true : $excluded;
+}
+add_filter( 'wpseo_sitemap_exclude_taxonomy', 'wpbb_child_yoast_exclude_megamenu_taxonomy', 20, 2 );
+
+function wpbb_child_yoast_mega_robots( $robots ) {
+    if ( is_singular( 'megamenu' ) || is_tax( 'megamenu-cat' ) ) return 'noindex, nofollow';
+    return $robots;
+}
+add_filter( 'wpseo_robots', 'wpbb_child_yoast_mega_robots', 20 );
+
+
+/**
+ * v3.8.10.21: global request-a-quote UI is opt-in by child theme.
+ * Sector themes with their own quote journeys can keep it; the rest do not
+ * expose an unrelated floating "My Quote" control or public route.
+ */
+if ( ! function_exists( 'wpbb_child_request_quote_enabled' ) ) {
+    function wpbb_child_request_quote_enabled() {
+        $enabled_themes = array(
+            'wp-bbtheme-child-automotive',
+            'wp-bbtheme-child-building-services',
+            'wp-bbtheme-child-insurance',
+            'wp-bbtheme-child-logistics',
+            'wp-bbtheme-child-medicine',
+            'wp-bbtheme-child-woo-tech-shop',
+        );
+        $enabled = in_array( get_stylesheet(), $enabled_themes, true );
+        return (bool) apply_filters( 'wpbb_child_request_quote_enabled', $enabled, get_stylesheet() );
+    }
+}
+
+function wpbb_child_request_quote_body_class( $classes ) {
+    $classes[] = wpbb_child_request_quote_enabled() ? 'wpbb-request-quote-enabled' : 'wpbb-request-quote-disabled';
+    return $classes;
+}
+add_filter( 'body_class', 'wpbb_child_request_quote_body_class', 30 );
+
+function wpbb_child_request_quote_menu_items( $items ) {
+    if ( wpbb_child_request_quote_enabled() ) return $items;
+    $target = trim( (string) wp_parse_url( home_url( '/request-a-quote/' ), PHP_URL_PATH ), '/' );
+    foreach ( $items as $key => $item ) {
+        $path = trim( (string) wp_parse_url( $item->url, PHP_URL_PATH ), '/' );
+        if ( $target && $path === $target ) unset( $items[ $key ] );
+    }
+    return $items;
+}
+add_filter( 'wp_nav_menu_objects', 'wpbb_child_request_quote_menu_items', 30 );
+
+function wpbb_child_request_quote_disable_route() {
+    if ( wpbb_child_request_quote_enabled() ) return;
+    $request = isset( $GLOBALS['wp']->request ) ? trim( (string) $GLOBALS['wp']->request, '/' ) : '';
+    if ( ! is_page( 'request-a-quote' ) && 'request-a-quote' !== $request ) return;
+
+    global $wp_query;
+    if ( $wp_query ) $wp_query->set_404();
+    status_header( 404 );
+    nocache_headers();
+    $template = get_404_template();
+    if ( $template ) {
+        include $template;
+        exit;
+    }
+    wp_die( esc_html__( 'Page not found.', 'wp-bbtheme-child' ), esc_html__( 'Not found', 'wp-bbtheme-child' ), array( 'response' => 404 ) );
+}
+add_action( 'template_redirect', 'wpbb_child_request_quote_disable_route', 1 );
+
+function wpbb_child_request_quote_sitemap_args( $args, $post_type ) {
+    if ( wpbb_child_request_quote_enabled() || 'page' !== $post_type ) return $args;
+    $page = get_page_by_path( 'request-a-quote' );
+    if ( $page ) {
+        $excluded = isset( $args['post__not_in'] ) ? (array) $args['post__not_in'] : array();
+        $excluded[] = (int) $page->ID;
+        $args['post__not_in'] = array_values( array_unique( $excluded ) );
+    }
+    return $args;
+}
+add_filter( 'wp_sitemaps_posts_query_args', 'wpbb_child_request_quote_sitemap_args', 30, 2 );
+
+require_once get_stylesheet_directory() . '/inc/seo-guardrails.php';
+
+/** v3.8.10.24: identify generated legal pages independently of translated slugs. */
+function wpbb_child_legal_page_body_class_v381024( $classes ) {
+    if ( ! is_page() ) return $classes;
+    $post = get_queried_object();
+    if ( ! $post instanceof WP_Post ) return $classes;
+
+    $is_legal = function_exists( 'is_privacy_policy' ) && is_privacy_policy();
+    if ( ! $is_legal && false !== strpos( (string) $post->post_content, 'wp-theme-legal-section' ) ) {
+        $is_legal = true;
+    }
+    if ( $is_legal ) $classes[] = 'wpbb-legal-page';
+    return array_values( array_unique( $classes ) );
+}
+add_filter( 'body_class', 'wpbb_child_legal_page_body_class_v381024', 40 );
+
+/** v3.8.10.25: remove generated empty spacing without touching authored copy. */
+if ( ! function_exists( 'wpbb_child_remove_empty_paragraphs_v381025' ) ) {
+    function wpbb_child_remove_empty_paragraphs_v381025( $content ) {
+        if ( is_admin() || ! is_string( $content ) || '' === $content ) return $content;
+        return (string) preg_replace(
+            '~<p(?:\\s[^>]*)?>(?:\\s|&nbsp;|&#160;|<br\\s*/?>)*</p>~i',
+            '',
+            $content
+        );
+    }
+}
+add_filter( 'the_content', 'wpbb_child_remove_empty_paragraphs_v381025', 120 );
+
+/** v3.8.10.25: do not output a completely empty CTA block above the footer. */
+if ( ! function_exists( 'wpbb_child_remove_empty_cta_v381025' ) ) {
+    function wpbb_child_remove_empty_cta_v381025( $block_content, $block ) {
+        if ( empty( $block['blockName'] ) || 'wpbb/cta-section' !== $block['blockName'] || ! is_string( $block_content ) ) return $block_content;
+        if ( preg_match( '~<(?:img|picture|video|iframe|form|button|a)\\b~i', $block_content ) ) return $block_content;
+        $plain = trim( html_entity_decode( wp_strip_all_tags( $block_content ), ENT_QUOTES | ENT_HTML5, get_bloginfo( 'charset' ) ) );
+        return '' === $plain ? '' : $block_content;
+    }
+}
+add_filter( 'render_block', 'wpbb_child_remove_empty_cta_v381025', 120, 2 );
+
